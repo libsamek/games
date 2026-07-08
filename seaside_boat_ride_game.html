@@ -1,0 +1,240 @@
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Interactive boat game: steer a boat along a seaside, collect stars and avoid buoys and rocks.</h2>
+<div style="border-radius:12px;overflow:hidden;border:0.5px solid var(--border);position:relative;">
+  <canvas id="sea" width="680" height="430" style="display:block;width:100%;height:auto;touch-action:none;"></canvas>
+</div>
+<div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+  <button id="btnStart" style="min-width:110px;">Start game</button>
+  <span style="font-size:13px;color:var(--text-secondary);">Arrow keys / W-S to steer · tap upper or lower sea on touch</span>
+</div>
+<script>
+const cv = document.getElementById('sea');
+const ctx = cv.getContext('2d');
+const W = 680, H = 430, SEA_TOP = 150;
+let state = 'idle';
+let boat, obs, stars, splashes, score, lives, speed, t, spawnT, starT, best = 0;
+
+function reset(){
+  boat = {x:110, y:(SEA_TOP+H)/2, vy:0, tilt:0};
+  obs = []; stars = []; splashes = [];
+  score = 0; lives = 3; speed = 3; t = 0; spawnT = 0; starT = 0;
+}
+reset();
+
+const keys = {};
+addEventListener('keydown', e=>{
+  if(['ArrowUp','ArrowDown','w','s','W','S'].includes(e.key)){ keys[e.key]=true; e.preventDefault(); }
+  if(state!=='playing' && (e.key===' '||e.key==='Enter')){ start(); }
+});
+addEventListener('keyup', e=>{ keys[e.key]=false; });
+
+let touchDir = 0;
+cv.addEventListener('pointerdown', e=>{
+  if(state!=='playing'){ start(); return; }
+  const r = cv.getBoundingClientRect();
+  const y = (e.clientY - r.top) * (H / r.height);
+  touchDir = y < boat.y ? -1 : 1;
+});
+cv.addEventListener('pointerup', ()=> touchDir = 0);
+cv.addEventListener('pointercancel', ()=> touchDir = 0);
+
+document.getElementById('btnStart').addEventListener('click', start);
+function start(){ reset(); state='playing'; document.getElementById('btnStart').textContent='Restart'; }
+
+function spawnObstacle(){
+  const type = Math.random() < 0.55 ? 'buoy' : 'rock';
+  obs.push({x: W+40, y: SEA_TOP+35+Math.random()*(H-SEA_TOP-70), type, ph: Math.random()*6});
+}
+function spawnStar(){
+  stars.push({x: W+30, y: SEA_TOP+35+Math.random()*(H-SEA_TOP-70), ph: Math.random()*6});
+}
+
+function update(){
+  t += 0.016;
+  if(state!=='playing') return;
+  speed = 3 + Math.min(4.5, t*0.08);
+  spawnT -= 0.016; starT -= 0.016;
+  if(spawnT<=0){ spawnObstacle(); spawnT = Math.max(0.55, 1.5 - t*0.02); }
+  if(starT<=0){ spawnStar(); starT = 1.1 + Math.random()*0.9; }
+
+  let dir = 0;
+  if(keys['ArrowUp']||keys['w']||keys['W']) dir -= 1;
+  if(keys['ArrowDown']||keys['s']||keys['S']) dir += 1;
+  dir += touchDir;
+  boat.vy += dir * 0.55;
+  boat.vy *= 0.9;
+  boat.y += boat.vy;
+  boat.y = Math.max(SEA_TOP+28, Math.min(H-30, boat.y));
+  boat.tilt = boat.vy * 0.04;
+
+  for(const o of obs) o.x -= speed;
+  for(const s of stars) s.x -= speed;
+  obs = obs.filter(o=>o.x>-60);
+  stars = stars.filter(s=>s.x>-40);
+
+  for(let i=stars.length-1;i>=0;i--){
+    const s = stars[i];
+    if(Math.hypot(s.x-boat.x, s.y-boat.y) < 34){
+      score += 10; stars.splice(i,1);
+      splashes.push({x:s.x,y:s.y,r:4,a:1,gold:true});
+    }
+  }
+  for(let i=obs.length-1;i>=0;i--){
+    const o = obs[i];
+    if(Math.hypot(o.x-boat.x, o.y-boat.y) < 32){
+      obs.splice(i,1); lives--;
+      splashes.push({x:boat.x,y:boat.y,r:6,a:1,gold:false});
+      if(lives<=0){ state='over'; best = Math.max(best, score); }
+    }
+  }
+  score += 0.03;
+  for(const sp of splashes){ sp.r += 1.6; sp.a -= 0.04; }
+  splashes = splashes.filter(sp=>sp.a>0);
+}
+
+function wave(y, amp, len, phase, col, alpha){
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for(let x=0; x<=W; x+=8){
+    ctx.lineTo(x, y + Math.sin(x/len + t*phase)*amp);
+  }
+  ctx.lineTo(W, H); ctx.closePath();
+  ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
+}
+
+function drawBoat(){
+  ctx.save();
+  ctx.translate(boat.x, boat.y + Math.sin(t*3)*2.5);
+  ctx.rotate(boat.tilt);
+  ctx.fillStyle = '#8B4A2B';
+  ctx.beginPath();
+  ctx.moveTo(-34, 0); ctx.quadraticCurveTo(-30, 16, -14, 18);
+  ctx.lineTo(20, 18); ctx.quadraticCurveTo(40, 14, 44, -2);
+  ctx.lineTo(30, -2); ctx.lineTo(-34, -2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#A85C38';
+  ctx.fillRect(-34, -6, 68, 5);
+  ctx.strokeStyle = '#5C2E14'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(2,-6); ctx.lineTo(2,-52); ctx.stroke();
+  ctx.fillStyle = '#F7F3E8';
+  ctx.beginPath(); ctx.moveTo(4,-50); ctx.quadraticCurveTo(34,-38,6,-10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#E24B4A';
+  ctx.beginPath(); ctx.moveTo(2,-52); ctx.lineTo(20,-47); ctx.lineTo(2,-43); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(boat.x-40, boat.y+16);
+  ctx.quadraticCurveTo(boat.x-58, boat.y+14+Math.sin(t*6)*3, boat.x-74, boat.y+18);
+  ctx.stroke();
+}
+
+function draw(){
+  ctx.fillStyle = '#FDE9C8'; ctx.fillRect(0,0,W,SEA_TOP+20);
+  ctx.fillStyle = '#F9B44C';
+  ctx.beginPath(); ctx.arc(560, 78, 34, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(249,180,76,0.55)'; ctx.lineWidth = 3;
+  for(let i=0;i<8;i++){
+    const a = i*Math.PI/4 + t*0.2;
+    ctx.beginPath();
+    ctx.moveTo(560+Math.cos(a)*44, 78+Math.sin(a)*44);
+    ctx.lineTo(560+Math.cos(a)*54, 78+Math.sin(a)*54);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for(const c of [[120,60,1],[300,95,0.7],[470,50,0.85]]){
+    const cx = (c[0] + t*8*c[2]) % (W+120) - 60;
+    ctx.beginPath();
+    ctx.ellipse(cx, c[1], 38*c[2], 13*c[2], 0, 0, 7);
+    ctx.ellipse(cx+26*c[2], c[1]+4, 26*c[2], 10*c[2], 0, 0, 7);
+    ctx.ellipse(cx-26*c[2], c[1]+5, 24*c[2], 9*c[2], 0, 0, 7);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#7BC1A8';
+  ctx.beginPath(); ctx.moveTo(0,SEA_TOP+8);
+  ctx.quadraticCurveTo(90,SEA_TOP-38,200,SEA_TOP+8);
+  ctx.quadraticCurveTo(330,SEA_TOP-24,460,SEA_TOP+8); ctx.lineTo(0,SEA_TOP+8);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#2E86AB'; ctx.fillRect(0, SEA_TOP, W, H-SEA_TOP);
+  wave(SEA_TOP+14, 6, 60, 1.6, '#3A97BD', 1);
+  wave(SEA_TOP+60, 7, 80, 1.2, '#2E86AB', 1);
+  wave(SEA_TOP+130, 8, 95, 0.9, '#22729B', 1);
+  wave(SEA_TOP+210, 9, 110, 0.7, '#1B5F87', 1);
+
+  for(const s of stars){
+    const bob = Math.sin(t*3+s.ph)*3;
+    ctx.save(); ctx.translate(s.x, s.y+bob); ctx.rotate(t+s.ph);
+    ctx.fillStyle = '#F9C74F';
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      const a = i*2*Math.PI/5 - Math.PI/2;
+      ctx.lineTo(Math.cos(a)*13, Math.sin(a)*13);
+      const b = a + Math.PI/5;
+      ctx.lineTo(Math.cos(b)*5.5, Math.sin(b)*5.5);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  for(const o of obs){
+    const bob = Math.sin(t*2.5+o.ph)*3;
+    if(o.type==='buoy'){
+      ctx.save(); ctx.translate(o.x, o.y+bob);
+      ctx.fillStyle = '#E24B4A';
+      ctx.beginPath(); ctx.arc(0,0,16,0,7); ctx.fill();
+      ctx.fillStyle = '#F7F3E8'; ctx.fillRect(-16,-5,32,10);
+      ctx.strokeStyle = '#A32D2D'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(0,-16); ctx.lineTo(0,-28); ctx.stroke();
+      ctx.fillStyle = '#F9C74F'; ctx.beginPath(); ctx.arc(0,-30,4,0,7); ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.save(); ctx.translate(o.x, o.y+bob*0.4);
+      ctx.fillStyle = '#5F5E5A';
+      ctx.beginPath();
+      ctx.moveTo(-22,12); ctx.lineTo(-14,-12); ctx.lineTo(-2,-6);
+      ctx.lineTo(8,-16); ctx.lineTo(22,10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#44443F';
+      ctx.beginPath(); ctx.moveTo(-2,-6); ctx.lineTo(8,-16); ctx.lineTo(22,10); ctx.lineTo(4,12); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+  for(const sp of splashes){
+    ctx.strokeStyle = sp.gold ? 'rgba(249,199,79,'+sp.a+')' : 'rgba(255,255,255,'+sp.a+')';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, 7); ctx.stroke();
+  }
+  if(state!=='idle') drawBoat();
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.font = '500 16px sans-serif';
+  if(state==='playing' || state==='over'){
+    ctx.fillStyle = '#4A1B0C';
+    ctx.fillText('Score ' + Math.round(score), 16, 28);
+    ctx.fillStyle = '#E24B4A';
+    let hearts = '';
+    for(let i=0;i<lives;i++) hearts += '♥ ';
+    ctx.fillText(hearts, 16, 50);
+  }
+  if(state==='idle'){
+    ctx.fillStyle = 'rgba(4,44,83,0.75)';
+    ctx.fillRect(140, 180, 400, 110);
+    ctx.fillStyle = '#FFFFFF'; ctx.textAlign='center';
+    ctx.font = '500 22px sans-serif';
+    ctx.fillText('Seaside boat ride', W/2, 222);
+    ctx.font = '400 14px sans-serif';
+    ctx.fillText('Collect stars, dodge buoys and rocks', W/2, 250);
+    ctx.fillText('Press start, space, or tap the sea', W/2, 272);
+    ctx.textAlign='left';
+  }
+  if(state==='over'){
+    ctx.fillStyle = 'rgba(4,44,83,0.78)';
+    ctx.fillRect(140, 170, 400, 130);
+    ctx.fillStyle = '#FFFFFF'; ctx.textAlign='center';
+    ctx.font = '500 22px sans-serif';
+    ctx.fillText('Capsized!', W/2, 210);
+    ctx.font = '400 15px sans-serif';
+    ctx.fillText('Score ' + Math.round(score) + '  ·  Best ' + Math.round(best), W/2, 240);
+    ctx.fillText('Tap or press space to sail again', W/2, 268);
+    ctx.textAlign='left';
+  }
+}
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
