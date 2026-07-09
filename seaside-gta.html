@@ -96,36 +96,54 @@ button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--page-bg),0 0 0 4px 
 <script>
 const cv = document.getElementById('gta');
 const ctx = cv.getContext('2d');
-const VW = 680, VH = 430, WW = 2000, WH = 1400;
+const VW = 680, VH = 430, WW = 2800, WH = 2000;
 let t = 0;
 
 const p = {x:1150, y:760, a:-Math.PI/2, spd:0, mode:'foot'};
 const car = {x:1160, y:640, a:-Math.PI/2, spd:0};
 const boat = {x:690, y:700, a:Math.PI, spd:0};
-let score = 0, msg = '', msgT = 0;
+let score = 0, msg = '', msgT = 0, swimTick = 0;
 
-const coins = [];
-for(let i=0;i<12;i++) coins.push({x:1050+Math.random()*850, y:220+Math.random()*1050, got:false});
-const stars = [];
-for(let i=0;i<10;i++) stars.push({x:80+Math.random()*720, y:100+Math.random()*1200, got:false, ph:Math.random()*6});
+const slot = {x:1192, y:636, w:56, h:128};
+const parked = [{x:1220,y:566,c:'#5B8FB9'},{x:1220,y:834,c:'#7FA86B'}];
+let parkT=0, parkedNow=false, parks=0;
+
+const rnd=(a,b)=>a+Math.random()*(b-a);
+function placeCoin(o){ do{o.x=rnd(1040,2720);o.y=rnd(200,1920);}while(terrain(o.x,o.y)!=='land'); }
+function placeStar(o){ do{o.x=rnd(60,840);o.y=rnd(80,1920);}while(terrain(o.x,o.y)!=='water'); o.ph=rnd(0,6); }
+function placeShell(o){ if(Math.random()<0.35){const a=rnd(0,6.283),r=rnd(40,150);o.x=450+Math.cos(a)*r;o.y=1550+Math.sin(a)*r;} else {o.x=rnd(905,975);o.y=rnd(100,1920);} o.r=rnd(0,6); }
+function placePearl(o){ do{o.x=rnd(60,840);o.y=rnd(80,1920);}while(terrain(o.x,o.y)!=='water'); o.ph=rnd(0,6); }
+function placeGem(o){ if(Math.random()<0.4){const a=rnd(0,6.283),r=rnd(30,120);o.x=450+Math.cos(a)*r;o.y=1550+Math.sin(a)*r;} else {do{o.x=rnd(1040,2720);o.y=rnd(200,1920);}while(terrain(o.x,o.y)!=='land');} }
+const coins = Array.from({length:16},()=>{const o={rt:0};placeCoin(o);return o;});
+const stars = Array.from({length:14},()=>{const o={rt:0};placeStar(o);return o;});
+const shells = Array.from({length:10},()=>{const o={rt:0};placeShell(o);return o;});
+const pearls = Array.from({length:10},()=>{const o={rt:0};placePearl(o);return o;});
+const gems = Array.from({length:5},()=>{const o={rt:0};placeGem(o);return o;});
+function tickRespawn(arr, place){
+  for(const o of arr){ if(o.rt>0){ o.rt-=0.016; if(o.rt<=0) place(o); } }
+}
 
 const bldgs = [
   [1300,380,180,120,'#C97B5A'],[1300,560,140,100,'#7BA8C9'],[1550,380,150,160,'#D9A45B'],
   [1300,860,200,120,'#9C8FBF'],[1560,900,160,140,'#C97B5A'],[1300,1020,130,90,'#8FBF9C'],
-  [1900,300,70,300,'#B0A08C'],[1900,700,70,340,'#B0A08C']
+  [1950,300,140,180,'#B0A08C'],[2400,300,200,140,'#9C8FBF'],[2100,800,160,120,'#8FBF9C'],
+  [2200,1450,180,110,'#C97B5A'],[2210,1620,140,120,'#D9A45B'],[2420,1480,90,220,'#7BA8C9']
 ];
-const palms = [[1000,300],[1010,520],[995,880],[1005,1120],[1240,180],[1700,1280],[1150,1330]];
+const palms = [[1000,300],[1010,520],[995,880],[1005,1120],[1240,180],[1700,1280],[1150,1330],
+  [400,1470],[525,1555],[435,1645],[2650,1000],[2050,1860],[1000,1600],[1005,1850]];
 
 function terrain(x,y){
   if(x>=740 && x<=990 && y>=670 && y<=735) return 'dock';
+  if(Math.hypot(x-450,y-1550)<170) return 'beach';
   if(x<900) return 'water';
   if(x<990) return 'beach';
   return 'land';
 }
 function onRoad(x,y){
-  const out = x>1080 && x<1880 && y>150 && y<1260;
-  const inn = x>1250 && x<1710 && y>330 && y<1080;
-  return out && !inn;
+  const r1 = (x>1080&&x<1880&&y>150&&y<1260) && !(x>1250&&x<1710&&y>330&&y<1080);
+  const conn = x>1880&&x<2280&&y>1120&&y<1260;
+  const r2 = (x>1950&&x<2700&&y>1200&&y<1940) && !(x>2120&&x<2530&&y>1370&&y<1770);
+  return r1||conn||r2;
 }
 
 let AC=null, master, musicGain, sfxGain, engOsc, engGain, engFilter, noiseBuf, muted=false, bumpCD=0, hornCD=0;
@@ -336,6 +354,16 @@ function sfxCoin(){ if(!AC) return; const n=AC.currentTime; note(988,n,0.1,'squa
 function sfxStar(){ if(!AC) return; const n=AC.currentTime; [659,880,1109,1319].forEach((f,i)=> note(f,n+i*0.07,0.18,'triangle',0.24,sfxGain)); }
 function sfxEnter(){ if(!AC) return; const n=AC.currentTime; note(140,n,0.15,'sine',0.35,sfxGain); note(220,n+0.06,0.12,'sine',0.22,sfxGain); }
 function sfxExit(){ if(!AC) return; const n=AC.currentTime; note(220,n,0.12,'sine',0.25,sfxGain); note(140,n+0.06,0.15,'sine',0.3,sfxGain); }
+function sfxPearl(){ if(!AC) return; const n=AC.currentTime; [523,784,1047].forEach((f,i)=> note(f,n+i*0.08,0.22,'sine',0.22,sfxGain)); }
+function sfxSplash(vol){
+  if(!AC) return;
+  const n=AC.currentTime;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type='lowpass'; f.frequency.value=900;
+  const g=AC.createGain();
+  g.gain.setValueAtTime(vol||0.25,n); g.gain.exponentialRampToValueAtTime(0.001,n+0.3);
+  s.connect(f); f.connect(g); g.connect(sfxGain); s.start(n); s.stop(n+0.32);
+}
 function sfxBump(){
   if(!AC || bumpCD>0) return; bumpCD = 0.3;
   const n=AC.currentTime;
@@ -377,8 +405,8 @@ document.querySelectorAll('.pad').forEach(b=>{
 function say(s){ msg = s; msgT = 2.5; }
 
 function doAction(){
-  if(p.mode==='foot'){
-    if(Math.hypot(p.x-car.x,p.y-car.y)<55){ p.mode='car'; sfxEnter(); say('Driving the car'); }
+  if(p.mode==='foot' || p.mode==='swim'){
+    if(p.mode==='foot' && Math.hypot(p.x-car.x,p.y-car.y)<55){ p.mode='car'; sfxEnter(); say('Driving the car'); }
     else if(Math.hypot(p.x-boat.x,p.y-boat.y)<70){ p.mode='boat'; sfxEnter(); say('Aboard the boat'); }
   } else if(p.mode==='car'){
     car.spd=0; p.mode='foot'; sfxExit();
@@ -386,9 +414,14 @@ function doAction(){
     if(terrain(p.x,p.y)==='water'){ p.x=car.x-Math.cos(car.a+1.57)*40; p.y=car.y-Math.sin(car.a+1.57)*40; }
     say('On foot');
   } else if(p.mode==='boat'){
+    boat.spd=0;
     if(Math.hypot(boat.x-865,boat.y-702)<160){
-      boat.spd=0; p.mode='foot'; sfxExit(); p.x=880; p.y=702; say('Stepped onto the pier');
-    } else say('Get closer to the pier to disembark');
+      p.mode='foot'; sfxExit(); p.x=880; p.y=702; say('Stepped onto the pier');
+    } else {
+      p.mode='swim'; sfxSplash();
+      p.x=boat.x-Math.cos(boat.a)*48; p.y=boat.y-Math.sin(boat.a)*48;
+      say('Dived in! Swim to shore or press E near the boat');
+    }
   }
 }
 
@@ -410,23 +443,62 @@ function update(){
   if(msgT>0) msgT -= 0.016;
   if(bumpCD>0) bumpCD -= 0.016;
   if(hornCD>0) hornCD -= 0.016;
+  if(swimTick>0) swimTick -= 0.016;
 
-  if(p.mode==='foot'){
+  if(p.mode==='foot' || p.mode==='swim'){
     let dx=(keys.right?1:0)-(keys.left?1:0), dy=(keys.down?1:0)-(keys.up?1:0);
     if(dx||dy){
       const l=Math.hypot(dx,dy); dx/=l; dy/=l;
       p.a = Math.atan2(dy,dx);
-      const nx=p.x+dx*2.4, ny=p.y+dy*2.4;
+      const spd = p.mode==='swim' ? 1.5 : 2.4;
+      const nx=p.x+dx*spd, ny=p.y+dy*spd;
       const tt=terrain(nx,ny);
-      if(tt!=='water' && nx>20&&nx<WW-20&&ny>20&&ny<WH-20){ p.x=nx; p.y=ny; }
+      if(nx>20&&nx<WW-20&&ny>20&&ny<WH-20){
+        if(p.mode==='foot'){
+          p.x=nx; p.y=ny;
+          if(tt==='water'){ p.mode='swim'; sfxSplash(); say('Swimming'); }
+        } else {
+          p.x=nx; p.y=ny;
+          if(tt!=='water'){ p.mode='foot'; sfxSplash(0.12); say('Back on land'); }
+          else if(swimTick<=0){ sfxSplash(0.06); swimTick=0.55; }
+        }
+      }
     }
   } else if(p.mode==='car'){
     const road = onRoad(car.x,car.y);
     drive(car, 0.22, road?7:3.2, 2.5, 0.045, 0.965, tt=> tt==='land'||tt==='beach');
+    for(const pc of parked){
+      const d = Math.hypot(car.x-pc.x, car.y-pc.y);
+      if(d<38){
+        sfxBump();
+        const a = Math.atan2(car.y-pc.y, car.x-pc.x);
+        car.x = pc.x + Math.cos(a)*38; car.y = pc.y + Math.sin(a)*38;
+        car.spd *= -0.3;
+      }
+    }
     p.x=car.x; p.y=car.y;
   } else {
     drive(boat, 0.14, 5.5, 1.8, 0.035, 0.985, tt=> tt==='water');
     p.x=boat.x; p.y=boat.y;
+  }
+
+  if(p.mode==='car'){
+    const inSlot = car.x>slot.x+8 && car.x<slot.x+slot.w-8 && car.y>slot.y+26 && car.y<slot.y+slot.h-26;
+    const angErr = Math.abs(Math.cos(car.a));
+    if(inSlot && Math.abs(car.spd)<0.15 && angErr<0.28){
+      parkT += 0.016;
+      if(parkT>0.8 && !parkedNow){
+        parkedNow = true; parks++;
+        const off = Math.hypot(car.x-(slot.x+slot.w/2), car.y-(slot.y+slot.h/2));
+        let pts=10, r='Parked';
+        if(off<10 && angErr<0.08){ pts=30; r='Perfect parking!'; }
+        else if(off<18 && angErr<0.16){ pts=20; r='Good parking'; }
+        score += pts; sfxStar(); say(r + ' +' + pts);
+      }
+    } else {
+      parkT = 0;
+      if(!inSlot) parkedNow = false;
+    }
   }
 
   if(AC && engGain){
@@ -445,17 +517,40 @@ function update(){
     engGain.gain.setTargetAtTime(muted?0:vol, AC.currentTime, 0.08);
     engOsc.frequency.setTargetAtTime(freq, AC.currentTime, 0.05);
     engFilter.frequency.setTargetAtTime(filt, AC.currentTime, 0.08);
-    const mv = (p.mode==='foot') ? 0.14 : 0.32;
+    const mv = (p.mode==='car'||p.mode==='boat') ? 0.32 : 0.14;
     musicGain.gain.setTargetAtTime(mv, AC.currentTime, 0.4);
   }
 
   for(const c of coins){
-    if(!c.got && Math.hypot(c.x-p.x,c.y-p.y)<30 && p.mode!=='boat'){ c.got=true; score+=5; sfxCoin(); }
+    if(c.rt<=0 && Math.hypot(c.x-p.x,c.y-p.y)<30 && (p.mode==='foot'||p.mode==='car')){ c.rt=18; score+=5; sfxCoin(); }
   }
   for(const s of stars){
-    if(!s.got && Math.hypot(s.x-p.x,s.y-p.y)<38 && p.mode==='boat'){ s.got=true; score+=10; sfxStar(); }
+    if(s.rt<=0 && Math.hypot(s.x-p.x,s.y-p.y)<38 && p.mode==='boat'){ s.rt=22; score+=10; sfxStar(); }
   }
-  if(coins.every(c=>c.got) && stars.every(s=>s.got) && msgT<=0) say('All collected! Score '+score+' — free roam forever');
+  for(const sh of shells){
+    if(sh.rt<=0 && Math.hypot(sh.x-p.x,sh.y-p.y)<26 && p.mode==='foot'){ sh.rt=18; score+=5; sfxCoin(); say('Shell +5'); }
+  }
+  for(const pe of pearls){
+    if(pe.rt<=0 && Math.hypot(pe.x-p.x,pe.y-p.y)<30 && p.mode==='swim'){ pe.rt=22; score+=15; sfxPearl(); say('Pearl +15'); }
+  }
+  for(const g of gems){
+    if(g.rt<=0 && Math.hypot(g.x-p.x,g.y-p.y)<30 && (p.mode==='foot'||p.mode==='car')){ g.rt=45; score+=25; sfxStar(); say('Gem +25'); }
+  }
+  tickRespawn(coins, placeCoin);
+  tickRespawn(stars, placeStar);
+  tickRespawn(shells, placeShell);
+  tickRespawn(pearls, placePearl);
+  tickRespawn(gems, placeGem);
+}
+
+function drawParkedCar(pc){
+  ctx.save(); ctx.translate(pc.x, pc.y); ctx.rotate(Math.PI/2);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(-20,-9,42,20);
+  ctx.fillStyle = pc.c;
+  ctx.beginPath(); ctx.roundRect(-22,-11,44,22,6); ctx.fill();
+  ctx.fillStyle = '#3A3A38'; ctx.beginPath(); ctx.roundRect(-10,-8,22,16,4); ctx.fill();
+  ctx.fillStyle = '#B9D9EA'; ctx.fillRect(8,-7,4,14); ctx.fillRect(-8,-7,3,14);
+  ctx.restore();
 }
 
 function draw(){
@@ -471,6 +566,11 @@ function draw(){
     for(let x=0;x<=900;x+=20) ctx.lineTo(x, y + Math.sin(x/70 + t*1.5 + y)*6);
     ctx.stroke();
   }
+  ctx.fillStyle = '#EFD9A7';
+  ctx.beginPath(); ctx.arc(450,1550,170,0,7); ctx.fill();
+  ctx.fillStyle = '#B9D19A';
+  ctx.beginPath(); ctx.arc(450,1550,62,0,7); ctx.fill();
+
   ctx.fillStyle = '#EFD9A7'; ctx.fillRect(900,0,90,WH);
   ctx.fillStyle = '#8FBF7A'; ctx.fillRect(990,0,WW-990,WH);
 
@@ -481,6 +581,27 @@ function draw(){
   ctx.strokeStyle = '#F7F3E8'; ctx.lineWidth = 3; ctx.setLineDash([22,18]);
   ctx.strokeRect(1165,240,630,930);
   ctx.setLineDash([]);
+
+  ctx.fillStyle = '#6B6B66';
+  ctx.fillRect(1880,1120,400,140);
+  ctx.fillRect(1950,1200,750,740);
+  ctx.fillStyle = '#8FBF7A';
+  ctx.fillRect(2120,1370,410,400);
+  ctx.strokeStyle = '#F7F3E8'; ctx.lineWidth = 3; ctx.setLineDash([22,18]);
+  ctx.strokeRect(2035,1285,580,570);
+  ctx.beginPath(); ctx.moveTo(1880,1190); ctx.lineTo(2280,1190); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = '#7C7C77'; ctx.fillRect(1188,500,62,400);
+  ctx.strokeStyle = '#F7F3E8'; ctx.lineWidth = 2;
+  ctx.strokeRect(1190,504,58,124);
+  ctx.strokeRect(1190,768,58,128);
+  ctx.strokeStyle = '#F9C74F'; ctx.lineWidth = 2.5; ctx.setLineDash([10,8]);
+  ctx.strokeRect(slot.x, slot.y, slot.w, slot.h);
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#F9C74F'; ctx.font = '500 20px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('P', slot.x+slot.w/2, slot.y+slot.h/2+7);
+  ctx.textAlign='left';
 
   ctx.fillStyle = '#A9743F'; ctx.fillRect(740,670,250,65);
   ctx.strokeStyle = '#7A4E26'; ctx.lineWidth=2;
@@ -502,13 +623,44 @@ function draw(){
     }
   }
 
+  for(const pc of parked) drawParkedCar(pc);
+
   for(const c of coins){
-    if(c.got) continue;
+    if(c.rt>0) continue;
     ctx.fillStyle = '#F9C74F'; ctx.beginPath(); ctx.arc(c.x,c.y,9,0,7); ctx.fill();
     ctx.strokeStyle = '#BA7517'; ctx.lineWidth=2; ctx.stroke();
   }
+  for(const sh of shells){
+    if(sh.rt>0) continue;
+    ctx.save(); ctx.translate(sh.x,sh.y); ctx.rotate(sh.r);
+    ctx.fillStyle = '#F2B5A0';
+    ctx.beginPath(); ctx.arc(0,0,9,Math.PI,0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#C97B5A'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-5,-7); ctx.moveTo(0,0); ctx.lineTo(0,-9); ctx.moveTo(0,0); ctx.lineTo(5,-7); ctx.stroke();
+    ctx.restore();
+  }
+  for(const pe of pearls){
+    if(pe.rt>0) continue;
+    const bob = Math.sin(t*2+pe.ph)*3;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(pe.x, pe.y+bob, 12, 0, 7); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.arc(pe.x, pe.y+bob, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(180,220,255,0.9)';
+    ctx.beginPath(); ctx.arc(pe.x-2, pe.y+bob-2, 2, 0, 7); ctx.fill();
+  }
+  for(const g of gems){
+    if(g.rt>0) continue;
+    const bob = Math.sin(t*2.2+g.x)*2;
+    ctx.save(); ctx.translate(g.x, g.y+bob);
+    ctx.fillStyle = '#4FC3B8';
+    ctx.beginPath(); ctx.moveTo(0,-11); ctx.lineTo(9,0); ctx.lineTo(0,11); ctx.lineTo(-9,0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(0,-11); ctx.lineTo(0,11); ctx.moveTo(-9,0); ctx.lineTo(9,0); ctx.stroke();
+    ctx.restore();
+  }
   for(const s of stars){
-    if(s.got) continue;
+    if(s.rt>0) continue;
     const bob = Math.sin(t*2.5+s.ph)*3;
     ctx.save(); ctx.translate(s.x,s.y+bob); ctx.rotate(t*0.8+s.ph);
     ctx.fillStyle = '#F9C74F'; ctx.beginPath();
@@ -550,24 +702,46 @@ function draw(){
     ctx.fillStyle='#2C5F8A'; ctx.beginPath(); ctx.arc(0,0,8,0,7); ctx.fill();
     ctx.fillStyle='#F4A870'; ctx.beginPath(); ctx.arc(Math.cos(p.a)*3,Math.sin(p.a)*3,4.5,0,7); ctx.fill();
     ctx.restore();
+  } else if(p.mode==='swim'){
+    ctx.save(); ctx.translate(p.x,p.y);
+    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=2;
+    const rip = (t*30)%16;
+    ctx.beginPath(); ctx.arc(0,0,8+rip,0,7); ctx.stroke();
+    ctx.globalAlpha = 1 - rip/16;
+    ctx.beginPath(); ctx.arc(0,0,14+rip,0,7); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle='rgba(255,255,255,0.8)';
+    const arm = Math.sin(t*8)*6;
+    ctx.beginPath(); ctx.arc(Math.cos(p.a+1.9)*9, Math.sin(p.a+1.9)*9+arm*0.3, 2.5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(Math.cos(p.a-1.9)*9, Math.sin(p.a-1.9)*9-arm*0.3, 2.5, 0, 7); ctx.fill();
+    ctx.fillStyle='#F4A870'; ctx.beginPath(); ctx.arc(0,0,5.5,0,7); ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
 
   ctx.fillStyle = 'rgba(4,44,83,0.75)';
-  ctx.fillRect(10,10,190,72);
+  ctx.fillRect(10,10,190,92);
   ctx.fillStyle = '#FFFFFF'; ctx.font='500 15px sans-serif';
   ctx.fillText('Score ' + score, 22, 32);
   ctx.font='400 12px sans-serif';
-  ctx.fillText(p.mode==='foot'?'On foot':(p.mode==='car'?'In car':'In boat'), 22, 50);
+  ctx.fillText(p.mode==='foot'?'On foot':(p.mode==='swim'?'Swimming':(p.mode==='car'?'In car':'In boat')), 22, 50);
   ctx.fillStyle = '#F9C74F';
   ctx.fillText(stations[stationIdx].name, 22, 70);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('Parks: ' + parks, 22, 90);
 
   let hint = '';
   if(p.mode==='foot'){
     if(Math.hypot(p.x-car.x,p.y-car.y)<55) hint='Press E — enter car';
     else if(Math.hypot(p.x-boat.x,p.y-boat.y)<70) hint='Press E — board boat';
+  } else if(p.mode==='swim'){
+    if(Math.hypot(p.x-boat.x,p.y-boat.y)<70) hint='Press E — climb aboard';
   } else if(p.mode==='boat' && Math.hypot(boat.x-865,boat.y-702)<160) hint='Press E — dock at pier';
-  else if(p.mode==='car') hint = onRoad(car.x,car.y)?'':'Off-road: slower';
+  else if(p.mode==='car'){
+    if(parkT>0 && !parkedNow) hint='Hold still...';
+    else if(Math.hypot(car.x-(slot.x+28), car.y-(slot.y+64))<200 && !parkedNow) hint='Parking bay: reverse into the yellow slot';
+    else hint = onRoad(car.x,car.y)?'':'Off-road: slower';
+  }
   if(msgT>0) hint = msg;
   if(hint){
     ctx.font='500 14px sans-serif';
@@ -577,14 +751,21 @@ function draw(){
     ctx.fillText(hint, VW/2, VH-26); ctx.textAlign='left';
   }
 
-  const ms=0.055;
+  const ms=0.04;
   ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fillRect(VW-WW*ms-14, 10, WW*ms+8, WH*ms+8);
   const mx=VW-WW*ms-10, my=14;
   ctx.fillStyle='#7FB6D0'; ctx.fillRect(mx,my,900*ms,WH*ms);
   ctx.fillStyle='#EFD9A7'; ctx.fillRect(mx+900*ms,my,90*ms,WH*ms);
   ctx.fillStyle='#A8D19A'; ctx.fillRect(mx+990*ms,my,(WW-990)*ms,WH*ms);
-  ctx.fillStyle='#6B6B66'; ctx.fillRect(mx+1080*ms,my+150*ms,800*ms,1110*ms);
-  ctx.fillStyle='#A8D19A'; ctx.fillRect(mx+1250*ms,my+330*ms,460*ms,750*ms);
+  ctx.fillStyle='#EFD9A7'; ctx.beginPath(); ctx.arc(mx+450*ms,my+1550*ms,170*ms,0,7); ctx.fill();
+  ctx.fillStyle='#6B6B66';
+  ctx.fillRect(mx+1080*ms,my+150*ms,800*ms,1110*ms);
+  ctx.fillRect(mx+1880*ms,my+1120*ms,400*ms,140*ms);
+  ctx.fillRect(mx+1950*ms,my+1200*ms,750*ms,740*ms);
+  ctx.fillStyle='#A8D19A';
+  ctx.fillRect(mx+1250*ms,my+330*ms,460*ms,750*ms);
+  ctx.fillRect(mx+2120*ms,my+1370*ms,410*ms,400*ms);
+  ctx.fillStyle='#F9C74F'; ctx.fillRect(mx+slot.x*ms-1, my+slot.y*ms-1, slot.w*ms+2, slot.h*ms+2);
   ctx.fillStyle='#E24B4A'; ctx.beginPath(); ctx.arc(mx+p.x*ms,my+p.y*ms,3,0,7); ctx.fill();
 }
 
