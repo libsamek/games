@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pencil drop</title>
+<style>
+:root {
+  --surface-0: #eeece6;
+  --surface-1: #f5f4ef;
+  --surface-2: #ffffff;
+  --border: rgba(0,0,0,0.14);
+  --border-strong: rgba(0,0,0,0.24);
+  --text-primary: #1a1a18;
+  --text-secondary: #5f5e5a;
+  --text-muted: #888780;
+  --radius: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-0: #262624;
+    --surface-1: #30302e;
+    --surface-2: #3a3a37;
+    --border: rgba(255,255,255,0.14);
+    --border-strong: rgba(255,255,255,0.26);
+    --text-primary: #f1efe8;
+    --text-secondary: #b4b2a9;
+    --text-muted: #888780;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+main { width: 100%; max-width: 680px; }
+h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
+.sub { font-size: 14px; color: var(--text-secondary); margin: 0 0 16px; }
+.bar { display: flex; align-items: center; justify-content: space-between; margin: 0 0 10px; }
+.stats { display: flex; gap: 16px; font-size: 14px; color: var(--text-secondary); }
+.stats b { font-weight: 500; color: var(--text-primary); }
+button {
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.08s ease;
+}
+button:hover { background: var(--surface-1); }
+button:active { transform: scale(0.98); }
+#wrap {
+  position: relative;
+  background: var(--surface-1);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  touch-action: none;
+}
+canvas { display: block; width: 100%; }
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+#ovTitle { font-size: 18px; font-weight: 500; }
+#ovSub { font-size: 14px; color: var(--text-secondary); }
+.hint { font-size: 13px; color: var(--text-muted); margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pencil drop</h1>
+  <p class="sub">Catch the falling pencils in the basket. Golden pencils are worth 3 points.</p>
+  <div class="bar">
+    <div class="stats">
+      <span>Score <b id="score">0</b></span>
+      <span>Lives <b id="lives">5</b></span>
+      <span>Best <b id="best">0</b></span>
+    </div>
+    <button id="btn">&#9654; Start</button>
+  </div>
+  <div id="wrap">
+    <canvas id="cv"></canvas>
+    <div id="overlay">
+      <div id="ovTitle">Pencil drop</div>
+      <div id="ovSub">Move the basket with your mouse, touch, or arrow keys</div>
+    </div>
+  </div>
+  <p class="hint">Miss a pencil and you lose a life. Speed increases with your score. Best score is saved between sessions.</p>
+</main>
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const wrap = document.getElementById('wrap');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const bestEl = document.getElementById('best');
+const btn = document.getElementById('btn');
+const overlay = document.getElementById('overlay');
+const ovTitle = document.getElementById('ovTitle');
+const ovSub = document.getElementById('ovSub');
+
+let W = 660, H = 420, dpr = window.devicePixelRatio || 1;
+function resize(){
+  W = wrap.clientWidth;
+  H = Math.min(440, Math.max(320, Math.round(W * 0.62)));
+  cv.width = W * dpr; cv.height = H * dpr;
+  cv.style.height = H + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+const C = dark ? {
+  wood:'#EF9F27', woodDark:'#BA7517', lead:'#B4B2A9', eraser:'#ED93B1', ferrule:'#888780',
+  gold:'#FAC775', goldDark:'#854F0B',
+  basket:'#F0997B', basketDark:'#D85A30', ground:'#444441'
+} : {
+  wood:'#EF9F27', woodDark:'#854F0B', lead:'#5F5E5A', eraser:'#D4537E', ferrule:'#888780',
+  gold:'#FAC775', goldDark:'#BA7517',
+  basket:'#D85A30', basketDark:'#993C1D', ground:'#D3D1C7'
+};
+
+let running = false, score = 0, lives = 5;
+let best = 0;
+try { best = parseInt(localStorage.getItem('pencilDropBest') || '0', 10) || 0; } catch(e) {}
+bestEl.textContent = best;
+
+let basketX = 0.5, basketW = 96, basketH = 34;
+let pencils = [], particles = [], spawnT = 0, spawnGap = 1200, speedMul = 1, last = 0;
+let keys = {};
+
+function reset(){
+  score = 0; lives = 5; pencils = []; particles = []; spawnGap = 1200; speedMul = 1; spawnT = 0;
+  scoreEl.textContent = 0; livesEl.textContent = 5;
+}
+
+function spawn(){
+  const golden = Math.random() < 0.12;
+  pencils.push({
+    x: 30 + Math.random() * (W - 60),
+    y: -40,
+    vy: (90 + Math.random() * 70) * speedMul,
+    rot: Math.random() * Math.PI * 2,
+    vr: (Math.random() - 0.5) * 3,
+    golden
+  });
+}
+
+function drawPencil(p){
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.rot);
+  const L = 46, Wd = 9;
+  ctx.fillStyle = p.golden ? C.gold : C.wood;
+  ctx.fillRect(-L/2 + 8, -Wd/2, L - 16, Wd);
+  ctx.fillStyle = p.golden ? C.goldDark : C.woodDark;
+  ctx.beginPath();
+  ctx.moveTo(L/2 - 8, -Wd/2); ctx.lineTo(L/2, 0); ctx.lineTo(L/2 - 8, Wd/2); ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = C.lead;
+  ctx.beginPath();
+  ctx.moveTo(L/2 - 3, -1.5); ctx.lineTo(L/2, 0); ctx.lineTo(L/2 - 3, 1.5); ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = C.ferrule;
+  ctx.fillRect(-L/2 + 4, -Wd/2, 4, Wd);
+  ctx.fillStyle = C.eraser;
+  ctx.fillRect(-L/2, -Wd/2, 4, Wd);
+  ctx.restore();
+}
+
+function drawBasket(bx, by){
+  ctx.fillStyle = C.basket;
+  ctx.beginPath();
+  ctx.moveTo(bx - basketW/2, by);
+  ctx.lineTo(bx + basketW/2, by);
+  ctx.lineTo(bx + basketW/2 - 12, by + basketH);
+  ctx.lineTo(bx - basketW/2 + 12, by + basketH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = C.basketDark;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(bx - basketW/2, by);
+  ctx.lineTo(bx + basketW/2, by);
+  ctx.stroke();
+  for(let i = 1; i <= 2; i++){
+    const y2 = by + (basketH/3)*i;
+    const shrink = 12 * (y2 - by) / basketH;
+    ctx.beginPath();
+    ctx.moveTo(bx - basketW/2 + shrink, y2);
+    ctx.lineTo(bx + basketW/2 - shrink, y2);
+    ctx.stroke();
+  }
+}
+
+function burst(x, y, col){
+  for(let i = 0; i < 8; i++){
+    particles.push({x, y, vx:(Math.random()-0.5)*160, vy:-Math.random()*140 - 40, life: 0.6, col});
+  }
+}
+
+function loop(t){
+  if(!running) return;
+  const dt = Math.min(0.033, (t - last)/1000); last = t;
+
+  if(keys.ArrowLeft) basketX -= 0.9 * dt;
+  if(keys.ArrowRight) basketX += 0.9 * dt;
+  basketX = Math.max(basketW/2/W, Math.min(1 - basketW/2/W, basketX));
+
+  spawnT += dt * 1000;
+  if(spawnT > spawnGap){ spawnT = 0; spawn(); }
+
+  const bx = basketX * W, by = H - basketH - 14;
+
+  for(let i = pencils.length - 1; i >= 0; i--){
+    const p = pencils[i];
+    p.y += p.vy * dt;
+    p.rot += p.vr * dt;
+    if(p.y > by - 6 && p.y < by + 14 && Math.abs(p.x - bx) < basketW/2){
+      pencils.splice(i, 1);
+      const pts = p.golden ? 3 : 1;
+      score += pts;
+      scoreEl.textContent = score;
+      burst(p.x, by, p.golden ? C.gold : C.wood);
+      speedMul = 1 + score * 0.02;
+      spawnGap = Math.max(420, 1200 - score * 14);
+    } else if(p.y > H + 30){
+      pencils.splice(i, 1);
+      lives--;
+      livesEl.textContent = lives;
+      burst(p.x, H - 10, C.lead);
+      if(lives <= 0){ gameOver(); return; }
+    }
+  }
+
+  for(let i = particles.length - 1; i >= 0; i--){
+    const q = particles[i];
+    q.life -= dt;
+    if(q.life <= 0){ particles.splice(i,1); continue; }
+    q.x += q.vx * dt; q.y += q.vy * dt; q.vy += 400 * dt;
+  }
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = C.ground;
+  ctx.fillRect(0, H - 8, W, 8);
+  pencils.forEach(drawPencil);
+  particles.forEach(q => {
+    ctx.globalAlpha = Math.max(0, q.life / 0.6);
+    ctx.fillStyle = q.col;
+    ctx.fillRect(q.x - 2, q.y - 2, 4, 4);
+    ctx.globalAlpha = 1;
+  });
+  drawBasket(bx, by);
+
+  requestAnimationFrame(loop);
+}
+
+function start(){
+  reset();
+  running = true;
+  overlay.style.display = 'none';
+  btn.innerHTML = '&#8635; Restart';
+  last = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function gameOver(){
+  running = false;
+  if(score > best){
+    best = score;
+    try { localStorage.setItem('pencilDropBest', String(best)); } catch(e) {}
+  }
+  bestEl.textContent = best;
+  ovTitle.textContent = 'Game over — ' + score + ' pencil' + (score === 1 ? '' : 's') + ' caught';
+  ovSub.textContent = 'Press start to play again';
+  overlay.style.display = 'flex';
+  btn.innerHTML = '&#9654; Start';
+}
+
+btn.addEventListener('click', start);
+overlay.addEventListener('click', () => { if(!running) start(); });
+
+wrap.addEventListener('mousemove', e => {
+  const r = wrap.getBoundingClientRect();
+  basketX = (e.clientX - r.left) / r.width;
+});
+wrap.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const r = wrap.getBoundingClientRect();
+  basketX = (e.touches[0].clientX - r.left) / r.width;
+}, {passive: false});
+window.addEventListener('keydown', e => {
+  if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){ keys[e.key] = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+ctx.clearRect(0,0,W,H);
+</script>
+</body>
+</html>
